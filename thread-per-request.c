@@ -58,7 +58,7 @@ int main(int argc, char const *argv[]) {
         return 3;
     }
 
-    while (1) {  // c10k
+    while (1) {  //
         struct sockaddr_in client_addr;
         memset(&client_addr, 0, sizeof(client_addr));
         socklen_t client_len = sizeof(client_addr);
