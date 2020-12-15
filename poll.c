@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-const static int BUFFER_SIZE = 1024;
+#include <sys/poll.h>
+#define POLL_SIZE 1024
 
 int main(int argc, char const *argv[]) {
     const int port = 9090;
@@ -38,64 +38,56 @@ int main(int argc, char const *argv[]) {
         perror("listen error");
         return 3;
     }
-    // 下面是 select的使用
-    fd_set rfds;
-    fd_set rset;
-    FD_ZERO(&rfds);
-    FD_SET(sockfd, &rfds);
+    // 下面是 poll 的使用
+    struct pollfd fds[POLL_SIZE] = {0};
+    fds[0].fd = sockfd;
+    fds[0].events = POLLIN;
 
-    int max_fd = sockfd;
+    int max_fd = 0;
     int i = 0;
-    while (1) {
-        rset = rfds;
-        int nready = select(max_fd + 1, &rset, NULL, NULL, NULL);
-        if (nready < 0) {
-            printf("select failed:%d\n", errno);
-            continue;
-        }
+    for (i = 1; i < POLL_SIZE; i++) {
+        fds[i].fd = -1;
+    }
 
-        if (FD_ISSET(sockfd, &rset)) {  // accept
+    while (1) {
+        int nready = poll(fds, max_fd + 1, 5);
+        if (nready < 0) continue;
+
+        if ((fds[0].revents & POLLIN) == POLLIN) {
             struct sockaddr_in client_addr;
             memset(&client_addr, 0, sizeof(client_addr));
             socklen_t client_len = sizeof(client_addr);
 
             int clientfd =
                 accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
-            if (clientfd < 0) {
-                continue;
-            }
-            if (max_fd == FD_SETSIZE) {
-                perror("clientfd --> out range\n");
-                break;
-            }
+            if (clientfd <= 0) continue;
 
-            FD_SET(clientfd, &rfds);
+            fds[clientfd].fd = clientfd;
+            fds[clientfd].events = POLLIN;
             if (clientfd > max_fd) max_fd = clientfd;
             if (--nready == 0) continue;
         }
 
         for (i = sockfd + 1; i <= max_fd; i++) {
-            if (FD_ISSET(i, &rset)) {
+            if (fds[i].revents & (POLLIN | POLLERR)) {
                 char buffer[1024] = {0};
                 int ret = recv(i, buffer, sizeof(buffer), 0);
                 if (ret < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        printf("read all data\n");
+                        perror("read all data");
                     }
-                    FD_CLR(i, &rfds);
-                    close(i);
+                    fds[i].fd = -1;
                 } else if (ret == 0) {
-                    printf("disconnect %d\n", i);
-                    FD_CLR(i, &rfds);
+                    printf(" disconnect %d \n", i);
                     close(i);
+                    fds[i].fd = -1;
                     break;
                 } else {
-                    printf("Recv:%s, %dBytes\n", buffer, ret);
+                    printf("Recv:%s, %d Bytes\n", buffer, ret);
                 }
                 if (--nready == 0) break;
             }
         }
     }
-
     return 0;
 }
